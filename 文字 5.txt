@@ -1,0 +1,110 @@
+import streamlit as st
+import sqlite3
+from openai import OpenAI
+
+# -----------------------------
+# GPT Client（你要填API KEY）
+# -----------------------------
+client = OpenAI(api_key="YOUR_API_KEY")
+
+# -----------------------------
+# DB
+# -----------------------------
+conn = sqlite3.connect("rules.db", check_same_thread=False)
+c = conn.cursor()
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS rules (
+    context TEXT,
+    action TEXT,
+    type TEXT,
+    weight INTEGER
+)
+""")
+conn.commit()
+
+
+# -----------------------------
+# AI Rule Generator
+# -----------------------------
+def extract_rules(text):
+    prompt = f"""
+    從以下文字提取決策規則：
+    - context（觸發條件）
+    - action（改善方式）
+    - type（error/optimize/observe）
+
+    文字：{text}
+
+    請用 JSON 輸出
+    """
+
+    res = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    return res.choices[0].message.content
+
+
+# -----------------------------
+# Rule Engine (80%)
+# -----------------------------
+def run_rules(text):
+    rules = c.execute("SELECT * FROM rules").fetchall()
+    result = text
+
+    for r in rules:
+        context, action, _, _ = r
+        if context in result:
+            result = result.replace(context, action)
+
+    return result
+
+
+# -----------------------------
+# Save Rule
+# -----------------------------
+def save_rule(context, action, rtype="observe", weight=1):
+    c.execute(
+        "INSERT INTO rules VALUES (?, ?, ?, ?)",
+        (context, action, rtype, weight)
+    )
+    conn.commit()
+
+
+# -----------------------------
+# UI
+# -----------------------------
+st.title("🧠 DRLDS V4 - Personal Decision OS")
+
+user_input = st.text_area("輸入你的內容")
+
+# -----------------------------
+# 80% Execution
+# -----------------------------
+if st.button("🚀 執行80%系統"):
+    output = run_rules(user_input)
+    st.success(output)
+
+# -----------------------------
+# 20% AI Learning
+# -----------------------------
+if st.button("🧠 AI學習（20%）"):
+    rules_json = extract_rules(user_input)
+    st.write("AI規則輸出：")
+    st.code(rules_json)
+
+    # 簡化版：手動轉存（V5會自動解析JSON）
+    st.info("（V4先顯示結果，下一版會自動寫入）")
+
+# -----------------------------
+# 規則庫
+# -----------------------------
+st.divider()
+st.subheader("📦 規則資料庫")
+
+rows = c.execute("SELECT * FROM rules").fetchall()
+
+for r in rows:
+    st.write(f"{r[2]} | {r[0]} → {r[1]}")
